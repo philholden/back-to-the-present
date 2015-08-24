@@ -13,3 +13,7 @@ A new user is able to join in the middle of a game.
 5. The subscribing client replays any remote actions falling later than the `consensusHead` on the state at the received state
 6. The subscribing client is now live and can send actions to other clients
 
+## TODO
+
+Create example using socket IO p2p
+
