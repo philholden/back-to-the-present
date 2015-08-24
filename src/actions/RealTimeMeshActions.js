@@ -1,44 +1,45 @@
 import {
-  WRITER_SUBSCRIBE,
-  WRITER_UNSUBSCRIBE,
-  INTENT,
-  FLUSH_CONSENSUS_ACTIONS,
-  UPDATE_HEAD_TO,
+  USER_SUBSCRIBE,
+  USER_UNSUBSCRIBE,
+  ADD_FRAME_INTENT,
+  SET_FRAME_STATE,
+  FAST_FORWARD,
 } from '../constants/RealTimeMeshConstants';
 
 
-export function writerSubscribe(userId) {
+export function userSubscribe(userId) {
   return {
-    type: WRITER_SUBSCRIBE,
-    userId
-  }
-}
-
-export function writerUnsubscribe(userId){
-  return {
-    type: WRITER_UNSUBSCRIBE,
+    type: USER_SUBSCRIBE,
     userId
   };
 }
 
-export function intent(frame, intent){
+export function userUnsubscribe(userId){
   return {
-    type: INTENT,
-    frame,
-    intent
+    type: USER_UNSUBSCRIBE,
+    userId
   };
 }
 
-export function flushConsensusActions(){
-  return{
-    type: FLUSH_CONSENSUS_ACTIONS
+export function addFrameIntent(frameIndex, frameIntent){
+  return {
+    type: ADD_FRAME_INTENT,
+    frameIndex,
+    frameIntent
   };
 }
 
-export function (frame){
+export function setFrameState(frameIndex, frameState){
   return {
-    type: UPDATE_HEAD_TO,
-    frame
+    type: SET_FRAME_STATE,
+    frameIndex,
+    frameState
+  };
+}
+
+export function fastForward(){
+  return {
+    type: FAST_FORWARD
   };
 }
 

@@ -1,123 +1,163 @@
-import { Record, List, Map, toImmutable} from 'immutable';
+import { Record, List, Map} from 'immutable';
+import {
+  USER_SUBSCRIBE,
+  USER_UNSUBSCRIBE,
+  ADD_FRAME_INTENT,
+  SET_FRAME_STATE,
+  FAST_FORWARD,
+  SET_HEAD,
+  COMPACT_HISTORY
+} from '../constants/RealTimeMeshConstants';
 
-window.List = List;
-
-// const startTime = Date.now();
-// const getTick = () => (Date.now() - startTime) / (1000 / 60);
-
-const History = Record({
+export const History = Record({
   userId: 0,
   head: 0,
   isSubscribing: false,
-  dirtyHead: 0,
+  dirtyHead: 1,
+  compactHead: 0,
   consensusHead: 0,
   subscribers: Map(), //{id, head, consensusOn}
-  consensusActions: List(), //[playsound]
   frames: List() //{intents, state}
 });
 
-const Frame = Record({
+export const Frame = Record({
   intents: List(),
-  state: {}
-})
-
-const Subscriber = Record({
-  userId: 0,
-  head: 0,
-  isSubscribing: false
+  state: null
 });
 
-const stateHistory = new History();
+export const Subscriber = Record({
+  userId: 0,
+  head: 0,
+  //isSubscribing: false
+});
 
-window.stateHistory = stateHistory;
-console.log(window.stateHistory.toJS());
+function setHead(frameIndex, stateHistory) {
+  return stateHistory.set('head', frameIndex);
+}
 
+function setDirtyHead(frameIndex, stateHistory) {
+  return stateHistory.set('dirtyHead', frameIndex);
+}
 
-function setIntent(frameIndex, intent, history) {
-  var frame = history.frames.get(frameIndex);
-  if (frame === undefined) {
-    frame = new Frame();
+function setCompactHead(frameIndex, stateHistory) {
+  return stateHistory.set('compactHead', frameIndex);
+}
+
+function addFrameIntent(frameIndex, intent, stateHistory) {
+  var frame = stateHistory.frames.get(frameIndex) || new Frame();
+  let intents = frame.intents.push(intent);
+  frame = frame.set('intents', intents);
+  return stateHistory.setIn(['frames', frameIndex], frame);
+}
+
+function setFrameState(frameIndex, state, stateHistory) {
+  var frame = stateHistory.frames.get(frameIndex) || new Frame();
+  frame = frame.set('state', state);
+  return stateHistory.setIn(['frames', frameIndex], frame);
+}
+
+function setSubscriberHead(userId, frameIndex, stateHistory) {
+  //var oldHead = stateHistory.subscribers.get(userId) || 0;
+  //var newHead = oldHead < frameIndex ? frameIndex : oldHead;
+  if (stateHistory.subscribers.get(userId) === undefined) {
+    console.warn('setSubscriber head user not found', userId);
   }
-  frame = frame.intents.push(intent);
-  return history.frames.set(frameIndex, frame);
+  return stateHistory.setIn(['subscribers', userId, 'head'], frameIndex);
 }
 
-function setSubscriberHead(userId, frameIndex, history) {
-  var oldHead = history.subscribers.get(userId) || 0;
-  var newHead = oldHead < frameIndex ? frameIndex : oldHead;
-  return history.setIn(['subscribers', userId, 'head', newHead]);
+function compactHistory(stateHistory) {
+  const {compactHead, consensusHead} = stateHistory;
+  for (let frameIndex = compactHead + 1; frameIndex < consensusHead; frameIndex++) {
+    stateHistory = stateHistory.setIn(['frames', frameIndex, 'state'], null);
+  }
+  return setCompactHead(stateHistory.consensusHead - 1, stateHistory);
 }
 
-function updateConsensusHead(history) {
-  var minHead = history.subscribers.map(subscriber => subscriber.head).min();
-  history = history.set('consensusHead', minHead);
-  return history;
+function updateConsensusHead(stateHistory) {
+  var minHead = stateHistory.subscribers.map(subscriber => subscriber.head).min() || stateHistory.consensusHead;
+  stateHistory = stateHistory.set('consensusHead', minHead);
+  return stateHistory;
 }
 
-function setUserIntent(userId, frameIndex, intent, history) {
-  history = setIntent(frameIndex, intent, history);
-  history = setWriterHeads(userId, frameIndex, history);
-  history = updateConsensusHead();
+function updateDirtyHead(frameIndex, stateHistory) {
+  if (frameIndex >= stateHistory.dirtyHead) return stateHistory;
+  return setDirtyHead(frameIndex, stateHistory);
 }
 
-function setHead(frameIndex) {
-  return history.head.set(frameIndex);
+function setUserIntent(userId, frameIndex, intent, stateHistory) {
+  stateHistory = addFrameIntent(frameIndex, intent, stateHistory);
+  stateHistory = setSubscriberHead(userId, frameIndex, stateHistory);
+  stateHistory = updateConsensusHead(stateHistory);
+  stateHistory = updateDirtyHead(frameIndex, stateHistory);
+  return stateHistory;
 }
 
-function nextFrameState(frameIndex, reduce, history) {
-  var intents = history.frames.get(frameIndex).intents;
-  var state = history.frames.get(frameIndex).state;
-  return reduce(intents, state);
+function updateFrameState(frameIndex, reduce, stateHistory) {
+  var frame = stateHistory.frames.get(frameIndex) || new Frame();
+  var {intents} = frame;
+  var prevFrame = stateHistory.frames.get(frameIndex - 1);
+  var state = prevFrame && prevFrame.state;
+  if (state === undefined) {
+    console.warn('tried to reduce undefined state at frameIndex:', frameIndex);
+    return stateHistory;
+  }
+  state = reduce(intents, state);
+  frame = frame.set('state', state);
+  return stateHistory.setIn(['frames', frameIndex], frame);
 }
 
-function fastforward(fromFrameIndex, toFrameIndex, reduce, history) {
+function fastforward(reduce, stateHistory) {
   var frameIndex;
-  var next;
-  for (frameIndex = fromFrameIndex; frameIndex <= toFrameIndex; frameIndex++) {
-    next = nextFrameState(frameIndex, reduce, history);
-    history = history.setIn(['frames', frameIndex, 'state'], next);
+  const {head, dirtyHead} = stateHistory;
+  for (frameIndex = dirtyHead; frameIndex <= head; frameIndex++) {
+    stateHistory = updateFrameState(frameIndex, reduce, stateHistory);
   }
-  history = setHead(toFrameIndex);
-  return history;
+  stateHistory = setDirtyHead(head, stateHistory);
+  return stateHistory;
 }
 
-function subscribe(userId, history) {
+function subscribe(userId, stateHistory) {
   //push relay
-  var {subscribers} = history;
+  var {subscribers} = stateHistory;
   var subscriber = new Subscriber({
     userId: userId,
-    head: history.head,
-    isSubscribing: true
+    head: stateHistory.head,
+    //isSubscribing: true
   });
-  subscribers = subscribers.push(subscriber);
-  history = history.setIn('subscriber', subscribers);
-  return history;
+  stateHistory = stateHistory.setIn(['subscribers', userId], subscriber);
+  return stateHistory;
 }
 
-function unsubscribe(userId, history) {
-  history = history.deleteIn('subscribers', userId);
-  return history;
+function unsubscribe(userId, stateHistory) {
+  stateHistory = stateHistory.deleteIn(['subscribers'], userId);
+  stateHistory = updateConsensusHead(stateHistory);
+  return stateHistory;
 }
 
-//window.recordIntent = recordIntent;
-//window.updateWriterHeads = updateWriterHeads;
+export default function RealTimeMeshReducer(reduceFrameState) {
+  const initialStateHistory = new History();
 
+  return function (stateHistory = initialStateHistory, action) {
 
-// This is just for reflux dev tools
-// function toImmutable(state) {
-//   if (state instanceof Record) {
-//     return state;
-//   } else {
-//     state.rows = List(state.rows);
-//     return new Table(state);
-//   }
-// }
-
-export default function (index, action) {
-  var state = toImmutable(state);
-  switch (action.type) {
-
-  default:
-    return state;
-  }
+    switch (action.type) {
+    case USER_SUBSCRIBE:
+      return subscribe(action.userId, stateHistory);
+    case USER_UNSUBSCRIBE:
+      return unsubscribe(action.userId, stateHistory);
+    case FAST_FORWARD:
+      return fastforward(reduceFrameState, stateHistory);
+    case SET_FRAME_STATE:
+      const {frameState} = action;
+      return setFrameState(action.frameIndex, frameState, stateHistory);
+    case ADD_FRAME_INTENT:
+      const {userId, frameIntent} = action;
+      return setUserIntent(userId, action.frameIndex, frameIntent, stateHistory);
+    case SET_HEAD:
+      return setHead(action.frameIndex, stateHistory);
+    case COMPACT_HISTORY:
+      return compactHistory(stateHistory);
+    default:
+      return stateHistory;
+    }
+  };
 }

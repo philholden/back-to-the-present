@@ -16,7 +16,8 @@
     "react/jsx-uses-vars": 2,
     "react/react-in-jsx-scope": 2,
     "eol-last": 0,
-    "brace-style": [2, "1tbs", { "allowSingleLine": true }]
+    "brace-style": [2, "1tbs", { "allowSingleLine": true }],
+    "new-cap": [2, {"capIsNew": false}]
   },
   "plugins": [
     "react"
